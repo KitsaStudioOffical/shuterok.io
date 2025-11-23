@@ -1,0 +1,14 @@
+[
+  {
+    "name": "🔥 Главный сервер сервер | Public Alpha",
+    "desc": "Официальный сервер",
+    "ip": "https://82d00805-54f9-40d5-939d-41f8fdbeea46-00-8hl8v75kj5kv.riker.replit.dev",
+    "region": "Replit"
+  },
+  {
+    "name": "localhost",
+    "desc": "localhost",
+    "ip": "http://localhost:3000",
+    "region": "localhost"
+  },
+]
