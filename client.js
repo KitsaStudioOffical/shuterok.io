@@ -109,7 +109,7 @@ async function loadServers() {
     listDiv.innerHTML = 'Загрузка...';
     
     try {
-        const res = await fetch('/shuterok.io/server-list.json');
+        const res = await fetch('https://kitsastudioofficial.github.io/shuterok.io/server-list.json');
         const servers = await res.json();
         
         listDiv.innerHTML = '';
