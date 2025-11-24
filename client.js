@@ -26,12 +26,10 @@ const sfx = new SoundManager();
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 
-// --- CONSTANTS & STATE ---
-const CLIENT_VERSION = "1.4.0";
+const CLIENT_VERSION = "1.4.1";
 let SERVER_VERSION = "?";
-let socket = null; // Сокет тепер глобальний, але ініціалізується пізніше
+let socket = null;
 
-// --- HARDWARE ID (для системи банів) ---
 let HWID = localStorage.getItem('shuterok_hwid');
 if (!HWID) {
     HWID = Math.random().toString(36).substring(2, 15) + Date.now().toString(36);
@@ -39,18 +37,15 @@ if (!HWID) {
 }
 document.getElementById('d-hwid').innerText = `HWID: ${HWID.substring(0, 10)}...`;
 
-// Settings
 const settings = {
     hq: true, names: true, minimap: true, audio: false,
     debug: { show: true, fps: true, ping: true, tps: true, walls: false, pl: true, food: false, ver: true, hwid: false, ac: true }
 };
 
-// Init Checkboxes
 const isTouch = /Android|iPhone/i.test(navigator.userAgent);
 const savedMob = localStorage.getItem('force_mobile');
 const isMob = savedMob !== null ? (savedMob === 'true') : isTouch;
 
-// Apply Defaults
 if (document.getElementById('set-mob')) document.getElementById('set-mob').checked = isMob;
 if (document.getElementById('set-audio')) document.getElementById('set-audio').checked = false;
 
@@ -59,17 +54,12 @@ if (isMob) {
     document.getElementById('mobile-upgrades').style.display = 'flex';
 }
 
-// Global Game Vars
 let meId=null, mapSize=4000, players={}, bullets=[], food=[], walls=[];
 let cam={x:0, y:0}, input={angle:0, move:false};
 let chatOpen = false;
 
-// Debug Vars
 let fps = 60, frames = 0, lastTime = performance.now();
 let ping = 0;
-
-
-// --- UI / SETTINGS LOGIC ---
 
 window.toggleSettings = (show) => {
     document.getElementById('settings-menu').style.display = show ? 'flex' : 'none';
@@ -114,20 +104,17 @@ function updateDebugVisibility() {
 }
 updateDebugVisibility();
 
-
-// --- SERVER BROWSER LOGIC ---
-
 async function loadServers() {
     const listDiv = document.getElementById('server-list');
-    listDiv.innerHTML = 'загрузка...';
+    listDiv.innerHTML = 'Загрузка...';
     
     try {
-        const res = await fetch('https://kitsastudiooffical.github.io/shuterok.io/server-list.json');
+        const res = await fetch('/server-list.json');
         const servers = await res.json();
         
         listDiv.innerHTML = '';
         if (servers.length === 0) {
-             listDiv.innerHTML = '<div style="color:yellow">нету серверов.</div>';
+             listDiv.innerHTML = '<div style="color:yellow">Список серверов пустой!</div>';
         }
 
         servers.forEach(srv => {
@@ -143,63 +130,49 @@ async function loadServers() {
         });
     } catch (e) {
         console.error("Server list error:", e);
-        listDiv.innerHTML = '<div style="color:red">ошибка загрузки списка серверов.</div>';
+        listDiv.innerHTML = '<div style="color:red">Ошибка загрузки списка серверов.</div>';
     }
 }
 
 function connectToServer(url) {
-    // Анти-двойной клик и визуальное подтверждение попытки подключения
     const serverList = document.getElementById('server-list');
     serverList.innerHTML = '<div style="color:#2ecc71; font-weight:bold; font-size:18px;">ПОДКЛЮЧЕНИЕ...</div>';
 
     if (socket) socket.disconnect();
 
-    // Встановлення з'єднання (Replit = HTTPS/WSS, используем transports для надежности)
     socket = io(url, {
         path: '/secure/v1/ws',
         query: { hwid: HWID },
         transports: ['websocket', 'polling'] 
     });
 
-    // Устанавливаем обработчики событий
     setupSocketEvents();
 
-    // 1. Устанавливаем таймаут на 10 секунд
     const connectionTimeout = setTimeout(() => {
         if (!socket.connected) {
             console.error("Connection attempt timed out. Reverting to server list.");
-            alert('Не удалось подключиться к серверу (Timeout). Проверьте URL в server-list.json.');
+            alert('Не удалось подключиться к серверу (Timeout).');
             if (socket) socket.disconnect();
-            loadServers(); // Перезагружаем список
+            loadServers();
         }
     }, 10000); 
 
-    // Сохраняем таймаут для очистки
     socket.__timeout = connectionTimeout;
 }
 
 loadServers();
 
-
-// --- SOCKET EVENTS ---
-
 function setupSocketEvents() {
-
-    // --- НОВОЕ СОБЫТИЕ: Успешное подключение ---
     socket.on('connect', () => {
-        // Очищаем таймаут при успешном соединении
         if (socket.__timeout) clearTimeout(socket.__timeout);
 
-        // Теперь, когда соединение WSS/HTTPS установлено, отправляем событие JOIN ('j')
         const nick = document.getElementById('nick').value;
         socket.emit('j', nick); 
 
-        // Скрываем меню
         document.getElementById('menu').style.display = 'none';
     });
 
     socket.on('connect_error', (error) => {
-        // Очищаем таймаут и показываем ошибку
         if (socket.__timeout) clearTimeout(socket.__timeout);
 
         console.error("Socket Connect Error:", error);
@@ -208,20 +181,17 @@ function setupSocketEvents() {
     });
 
     socket.on('err', (msg) => {
-        // Общая ошибка сервера (бан, переполнение)
         alert('Ошибка сервера: ' + msg); 
         location.reload();
     });
 
     
     socket.on('connect_error', () => {
-        // Якщо не вдалося підключитися (наприклад, сервер вимкнений)
         alert('не удалось подключиться');
         location.reload(); 
     });
 
     socket.on('err', (msg) => {
-        // Обробка помилок сервера (бан, переповнення)
         alert('Помилка сервера: ' + msg); 
         location.reload();
     });
@@ -254,7 +224,6 @@ function setupSocketEvents() {
         if (Math.hypot(dx, dy) < 1500) sfx.play(d.type);
     });
 
-    // Ping Logic
     setInterval(() => {
         if(socket && socket.connected) {
             const start = Date.now();
@@ -266,7 +235,6 @@ function setupSocketEvents() {
         document.getElementById('d-ping').innerText = `PING: ${ping}ms`;
     });
 
-    // Event STATE - 'u' (update)
     socket.on('u', pack => {
         pack.p.forEach(srv => {
             let p = players[srv.id];
@@ -282,7 +250,6 @@ function setupSocketEvents() {
         let t = pack.time, m = Math.floor(t/60), s = Math.floor(t%60);
         document.getElementById('timer').innerText = `${m}:${s<10?'0'+s:s}`;
 
-        // Update Debug Stats
         if (pack.d) {
             document.getElementById('d-tps').innerText = `S-TPS: ${pack.d.tps}`;
             document.getElementById('d-walls').innerText = `WALLS: ${pack.d.w}`;
@@ -295,10 +262,6 @@ function setupSocketEvents() {
     });
 }
 
-
-// --- GAME LOGIC (CONTROLS & DRAWING) ---
-
-// SoftBody (Visuals)
 class SoftBody {
     constructor(r, c) { this.nodes=[]; this.r=r; this.c=c; for(let i=0;i<12;i++) this.nodes.push({x:0,y:0,vx:0,vy:0}); }
     update(x,y,r,a,mov) {
@@ -329,7 +292,6 @@ class SoftBody {
     }
 }
 
-// Controls (Events renamed: input -> i, shoot -> s, upgrade -> u, chat -> c)
 if (!isMob) {
     window.onmousemove = e => {
         if(chatOpen || !socket) return;
@@ -384,7 +346,6 @@ function updateHUD() {
 }
 
 function draw() {
-    // FPS Calc
     frames++;
     const now = performance.now();
     if (now - lastTime >= 1000) {
