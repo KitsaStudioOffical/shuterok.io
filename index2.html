@@ -1,0 +1,485 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no" />
+<title>Shuterok.io — unified (mobile + PC) client</title>
+<style>
+  :root{
+    --bg:#06121a; --panel:#071826; --accent:#27ae60; --muted:#9aa9b6;
+  }
+  html,body{height:100%;margin:0;font-family:Inter, Roboto, Arial, sans-serif;background:linear-gradient(180deg,var(--bg),#000);color:#e6eef8}
+  #app{position:relative;height:100vh;overflow:hidden}
+  /* canvas (game) */
+  canvas#game{position:absolute;inset:0;width:100%;height:100%;background:#02040a;display:block}
+
+  /* overlay UI (menu, HUD) */
+  #menu, #settings-menu, #game-over{position:absolute;left:50%;top:10%;transform:translateX(-50%);background:linear-gradient(180deg,rgba(255,255,255,0.02),rgba(255,255,255,0.01));padding:18px;border-radius:12px;backdrop-filter: blur(6px);width:min(880px,92%);box-shadow:0 6px 30px rgba(0,0,0,0.6)}
+  #menu h1{font-size:50px;margin:0;color:var(--accent)}
+  #menu input[type=text]{width:260px;padding:8px;margin-top:8px;border-radius:8px;border:1px solid rgba(255,255,255,0.06);background:rgba(0,0,0,0.25);color:inherit}
+  #server-list{background:rgba(255,255,255,0.02);padding:10px;border-radius:8px;margin-top:8px;max-height:200px;overflow:auto;color:var(--muted)}
+  button{padding:10px 14px;border-radius:10px;border:0;background:var(--accent);color:#042029;font-weight:700;cursor:pointer}
+  button.red{background:#e74c3c;color:#fff}
+  #settings-menu{display:none}
+  #game-over{display:none;text-align:center}
+
+  /* ui-layer: HUD, debug, chat, leaderboard */
+  #ui-layer{position:absolute;inset:0;pointer-events:none}
+  #hud-top{position:absolute;left:12px;top:12px;padding:6px 10px;border-radius:8px;background:rgba(0,0,0,0.35);color:var(--muted)}
+  #gear-btn{position:absolute;right:12px;top:12px;padding:8px;border-radius:10px;background:rgba(0,0,0,0.35);cursor:pointer;color:var(--muted)}
+  #debug-panel{position:absolute;left:12px;top:56px;color:var(--muted);background:rgba(0,0,0,0.25);padding:8px;border-radius:8px}
+  #leaderboard{position:absolute;right:12px;top:56px;color:var(--muted);background:rgba(0,0,0,0.25);padding:8px;border-radius:8px;max-width:220px}
+  #chat-box{position:absolute;left:12px;bottom:12px;width:320px;background:rgba(0,0,0,0.35);padding:8px;border-radius:10px;pointer-events:auto}
+  #chat-box input{width:100%;padding:8px;border-radius:8px;border:0;background:rgba(255,255,255,0.03);color:inherit}
+
+  /* Upgrades (desktop) */
+  #upgrades{position:absolute;right:12px;bottom:12px;width:260px;background:rgba(0,0,0,0.35);padding:10px;border-radius:10px;pointer-events:auto}
+  .stat-row{display:flex;justify-content:space-between;align-items:center;padding:6px 8px;border-radius:8px;margin:6px 0;background:linear-gradient(90deg,rgba(255,255,255,0.01),transparent);cursor:pointer}
+
+  /* MOBILE CONTROLS (default hidden on desktop) */
+  .mobile-controls{position:fixed;inset:0;pointer-events:none}
+  #mjoy-outer{position:fixed;left:18px;bottom:18px;width:160px;height:160px;border-radius:50%;background:rgba(255,255,255,0.03);touch-action:none;pointer-events:auto}
+  #mjoy-knob{position:absolute;width:60px;height:60px;border-radius:50%;background:linear-gradient(180deg,#fff,#cfe6ff);left:50%;top:50%;transform:translate(-50%,-50%);box-shadow:0 6px 20px rgba(0,0,0,0.6)}
+  #mlook-outer{position:fixed;right:18px;bottom:18px;width:160px;height:160px;border-radius:50%;background:rgba(255,255,255,0.02);touch-action:none;pointer-events:auto}
+  #mlook-knob{position:absolute;width:56px;height:56px;border-radius:50%;background:linear-gradient(180deg,#fff,#cfe6ff);left:50%;top:50%;transform:translate(-50%,-50%);box-shadow:0 6px 20px rgba(0,0,0,0.6)}
+  #fire-btn{position:fixed;right:110px;bottom:36px;width:84px;height:84px;border-radius:50%;background:rgba(231,76,60,0.28);border:2px solid rgba(231,76,60,0.9);pointer-events:auto}
+  #reload-btn{position:fixed;right:110px;bottom:136px;width:56px;height:56px;border-radius:12px;background:rgba(255,255,255,0.04);pointer-events:auto}
+  .mobile-hint{position:fixed;left:50%;transform:translateX(-50%);bottom:6px;color:var(--muted);font-size:13px;pointer-events:none}
+
+  /* show/hide helpers */
+  .hidden{display:none}
+  .desktop-only{display:none}
+  @media (hover:hover) and (pointer:fine){ /* likely desktop */ 
+    .mobile-controls{display:none}
+    .desktop-only{display:block}
+  }
+  @media (max-width:900px){
+    /* make overlays compact on small screens */
+    #menu{top:6%}
+    #menu h1{font-size:36px}
+    #chat-box{width:calc(100% - 28px);left:14px;right:14px}
+    #upgrades{right:12px;left:12px}
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <!-- Game canvas -->
+  <canvas id="game" width="1280" height="720"></canvas>
+
+  <!-- Main Menu (kept from original) -->
+  <div id="menu">
+    <h1>SHUTEROK.IO</h1>
+    <div style="color:var(--muted);margin-bottom:8px">Client v1.4</div>
+    <input id="nick" type="text" placeholder="Твой Ник" maxlength="15" value="">
+    <p style="color:var(--muted);margin:8px 0 0 0">Первое подключение на главный сервер = запуск (1&lt; минуты, не всегда)</p>
+
+    <div id="server-browser" style="margin-top:12px">
+      <h3 style="margin:0 0 8px 0">СПИСОК СЕРВЕРОВ:</h3>
+      <div id="server-list">Загрузка...</div>
+    </div>
+
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button onclick="toggleSettings(true)">НАСТРОЙКИ</button>
+      <button class="red" onclick="startGame()">ПОДКЛЮЧИТЬСЯ</button>
+      <div style="flex:1"></div>
+      <label style="align-self:center;color:var(--muted)">Режим:
+        <select id="modeSelect" onchange="forceMode(this.value)">
+          <option value="auto">Авто</option>
+          <option value="mobile">Мобильный (force)</option>
+          <option value="desktop">ПК (force)</option>
+        </select>
+      </label>
+    </div>
+  </div>
+
+  <!-- Settings (simple copy) -->
+  <div id="settings-menu" class="hidden">
+    <h2>НАСТРОЙКИ</h2>
+    <div style="display:flex;gap:18px;flex-wrap:wrap">
+      <div style="min-width:220px">
+        <h3>Графика и Игра</h3>
+        <label><input type="checkbox" id="set-hq" checked> Крутая физика</label><br>
+        <label><input type="checkbox" id="set-names" checked> Имена</label><br>
+        <label><input type="checkbox" id="set-mini" checked> Миникарта</label><br>
+        <label><input type="checkbox" id="set-mob"> Мобильное упр.</label><br>
+        <label><input type="checkbox" id="set-audio"> Звуки</label>
+      </div>
+      <div style="min-width:220px">
+        <h3>Debug Меню (Инфо)</h3>
+        <label><input type="checkbox" id="dbg-main" checked> Показать Меню</label><br>
+        <label><input type="checkbox" id="dbg-fps" checked> FPS</label><br>
+        <label><input type="checkbox" id="dbg-ping" checked> PING</label><br>
+        <label><input type="checkbox" id="dbg-pl" checked> PLAYERS</label><br>
+        <label><input type="checkbox" id="dbg-ver" checked> VERSIONS</label>
+      </div>
+    </div>
+    <div style="margin-top:12px"><button onclick="toggleSettings(false)">ГОТОВО</button></div>
+  </div>
+
+  <div id="game-over" class="hidden">
+    <h1 style="font-size:60px;color:gold">ПОБЕДИТЕЛЬ</h1>
+    <h2 id="winner-name">-</h2>
+    <p>Перезапуск раунда...</p>
+    <button onclick="location.reload()">ВЕРНУТЬСЯ В МЕНЮ</button>
+  </div>
+
+  <!-- UI Layer -->
+  <div id="ui-layer" aria-hidden="true">
+    <div id="hud-top">⏳ <span id="timer">00:00</span></div>
+    <div id="gear-btn" onclick="toggleSettings(true)">⚙️</div>
+    <div id="debug-panel">
+      <div id="d-fps">FPS: 0</div>
+      <div id="d-ping">PING: 0ms</div>
+      <div id="d-tps">S-TPS: 60</div>
+      <div id="d-ver">v1.3.5</div>
+    </div>
+    <div id="leaderboard">Leaderboards</div>
+
+    <div id="chat-box">
+      <div id="chat-msgs" style="max-height:160px;overflow:auto;color:var(--muted)">Система: Привет!</div>
+      <input id="chat-input" type="text" placeholder="Enter чат" maxlength="50" onkeydown="if(event.key==='Enter')sendChat()" />
+    </div>
+
+    <div id="upgrades">
+      <div style="color:#f1c40f">Points: <span id="pts">0</span></div>
+      <div class="stat-row" onclick="buyOrEquip('default')">0. Default</div>
+      <div class="stat-row" onclick="upgrade('dmg')">1. Dmg</div>
+      <div class="stat-row" onclick="upgrade('spd')">2. Spd</div>
+    </div>
+  </div>
+
+  <!-- MOBILE CONTROLS (added) -->
+  <div class="mobile-controls hidden" id="mobileControls">
+    <div id="mjoy-outer" aria-label="Joystick (движение)"><div id="mjoy-knob"></div></div>
+    <div id="mlook-outer" aria-label="Right joystick (прицел)"><div id="mlook-knob"></div></div>
+    <div id="fire-btn" aria-label="Fire (огонь)"></div>
+    <div id="reload-btn" aria-label="Reload (перезарядка)">R</div>
+    <div class="mobile-hint">Мобильный режим: джойстик — влево; прицел — вправо; огонь — кнопка</div>
+  </div>
+</div>
+
+<script>
+/* ================================
+   Auto-detect mode (mobile vs desktop)
+   - auto if touch / maxTouchPoints > 0 or UA mobile
+   - can force via select (#modeSelect)
+   ================================= */
+const mobileControls = document.getElementById('mobileControls');
+const modeSelect = document.getElementById('modeSelect');
+
+function isMobileLike(){
+  return (('ontouchstart' in window) || navigator.maxTouchPoints > 0 || /Mobi|Android|iPhone|iPad|Phone/i.test(navigator.userAgent));
+}
+
+let forcedMode = 'auto'; // 'auto' | 'mobile' | 'desktop'
+function evaluateMode(){
+  const effective = (forcedMode === 'auto') ? (isMobileLike() ? 'mobile' : 'desktop') : forcedMode;
+  applyMode(effective);
+  return effective;
+}
+function forceMode(v){
+  forcedMode = v;
+  evaluateMode();
+  // keep select in sync (could be changed by user)
+  modeSelect.value = v;
+}
+function applyMode(mode){
+  if(mode === 'mobile'){
+    mobileControls.classList.remove('hidden');
+    // hide heavy overlays to make play area clear
+    document.getElementById('menu').classList.add('hidden');
+    document.getElementById('ui-layer').style.pointerEvents = 'none';
+  } else {
+    mobileControls.classList.add('hidden');
+    document.getElementById('menu').classList.remove('hidden');
+    document.getElementById('ui-layer').style.pointerEvents = 'auto';
+  }
+  console.info('Mode applied:', mode);
+}
+
+/* initialize */
+if(!modeSelect) console.warn('modeSelect not found');
+modeSelect.value = 'auto';
+evaluateMode();
+
+/* ===========================
+   Basic UI helpers (menu)
+   - toggleSettings, startGame, chat
+   =========================== */
+function toggleSettings(show){
+  const el = document.getElementById('settings-menu');
+  el.style.display = show ? 'block' : 'none';
+}
+function startGame(){
+  document.getElementById('menu').classList.add('hidden');
+  // real game startup code would go here (socket connect etc.)
+  console.info('Game start (stub)');
+}
+function sendChat(){
+  const t = document.getElementById('chat-input');
+  const msgs = document.getElementById('chat-msgs');
+  if(t.value.trim()){
+    msgs.innerHTML += '<div style="color:#9bd7ff">Ты: '+escapeHtml(t.value)+'</div>';
+    msgs.scrollTop = msgs.scrollHeight;
+    t.value = '';
+  }
+}
+function escapeHtml(s){ return s.replace(/[&<>"']/g, c=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' })[c]); }
+
+/* ===========================
+   Virtual joystick (left) -> WASD
+   Right joystick -> emulated mousemove relative to canvas center
+   Fire -> Space (keydown/keyup)
+   Reload -> 'r' key
+   Exposed API: window.virtualInput
+   =========================== */
+(function(){
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+
+  // small demo render loop so you can test controls visually
+  let px = canvas.width/2, py = canvas.height/2;
+  function demoDraw(){
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    // draw player
+    ctx.fillStyle = '#27ae60';
+    ctx.beginPath(); ctx.arc(px,py,18,0,Math.PI*2); ctx.fill();
+    requestAnimationFrame(demoDraw);
+  }
+  demoDraw();
+
+  // helpers to dispatch events
+  function dispatchKey(type, key, code){
+    // Some pages ignore synthetic events; we still dispatch and also emit a custom event
+    const ev = new KeyboardEvent(type, {key:key, code:code||('Key'+key.toUpperCase()), bubbles:true, cancelable:true});
+    window.dispatchEvent(ev);
+    window.dispatchEvent(new CustomEvent('virtual-input-key', {detail:{type,key,code}}));
+  }
+  function dispatchMouseMove(clientX, clientY){
+    const rect = canvas.getBoundingClientRect();
+    const cx = Math.min(Math.max(clientX, rect.left), rect.right);
+    const cy = Math.min(Math.max(clientY, rect.top), rect.bottom);
+    const ev = new MouseEvent('mousemove', {clientX: cx, clientY: cy, bubbles: true});
+    canvas.dispatchEvent(ev);
+    window.dispatchEvent(new CustomEvent('virtual-input-mouse', {detail:{clientX:cx,clientY:cy}}));
+  }
+  function dispatchMouseDown(){
+    const ev = new MouseEvent('mousedown', {bubbles:true});
+    canvas.dispatchEvent(ev);
+  }
+  function dispatchMouseUp(){
+    const ev = new MouseEvent('mouseup', {bubbles:true});
+    canvas.dispatchEvent(ev);
+  }
+
+  // keyboard set for mobile: we will emulate keydown when active and keyup when released
+  const activeKeys = new Set();
+  function updateActiveKeys(newKeys){
+    const now = new Set(newKeys);
+    for(const k of now) if(!activeKeys.has(k)){ activeKeys.add(k); dispatchKey('keydown',k); }
+    for(const k of [...activeKeys]) if(!now.has(k)){ activeKeys.delete(k); dispatchKey('keyup',k); }
+  }
+
+  // ----------------- LEFT JOYSTICK (movement) -----------------
+  const joyOuter = document.getElementById('mjoy-outer');
+  const joyKnob = document.getElementById('mjoy-knob');
+  let joyCenter = {x:0,y:0}, joyMax = 60;
+  function recalcJoy(){
+    const r = joyOuter.getBoundingClientRect();
+    joyCenter = {x: r.left + r.width/2, y: r.top + r.height/2};
+    joyMax = Math.min(r.width, r.height)/2 - 28;
+  }
+  recalcJoy(); addEventListener('resize', recalcJoy);
+
+  function keysFromVector(dx,dy){
+    const dist = Math.hypot(dx,dy);
+    const dead = 18;
+    if(dist < dead) return [];
+    const nx = dx/dist, ny = dy/dist; // ny positive = down
+    const out = [];
+    if(ny < -0.45) out.push('w');
+    if(ny > 0.45) out.push('s');
+    if(nx < -0.45) out.push('a');
+    if(nx > 0.45) out.push('d');
+    return out;
+  }
+
+  function setKnobPos(knob, x, y){
+    knob.style.transform = `translate(${x}px, ${y}px)`;
+  }
+
+  let leftTouchId = null;
+  joyOuter.addEventListener('touchstart', e=>{
+    e.preventDefault();
+    recalcJoy();
+    const t = e.changedTouches[0];
+    leftTouchId = t.identifier;
+    const dx = t.clientX - joyCenter.x, dy = t.clientY - joyCenter.y;
+    const dist = Math.hypot(dx,dy);
+    const clamped = dist > joyMax ? (joyMax/dist) : 1;
+    setKnobPos(joyKnob, dx*clamped, dy*clamped);
+    updateActiveKeys(keysFromVector(dx,dy));
+  }, {passive:false});
+  joyOuter.addEventListener('touchmove', e=>{
+    e.preventDefault();
+    for(const t of e.changedTouches) if(t.identifier === leftTouchId){
+      const dx = t.clientX - joyCenter.x, dy = t.clientY - joyCenter.y;
+      const dist = Math.hypot(dx,dy);
+      const clamped = dist > joyMax ? (joyMax/dist) : 1;
+      setKnobPos(joyKnob, dx*clamped, dy*clamped);
+      updateActiveKeys(keysFromVector(dx,dy));
+    }
+  }, {passive:false});
+  joyOuter.addEventListener('touchend', e=>{
+    e.preventDefault();
+    for(const t of e.changedTouches) if(t.identifier === leftTouchId){
+      leftTouchId = null;
+      setKnobPos(joyKnob,0,0);
+      updateActiveKeys([]);
+    }
+  }, {passive:false});
+  joyOuter.addEventListener('touchcancel', ()=>{ leftTouchId=null; setKnobPos(joyKnob,0,0); updateActiveKeys([]); });
+
+  // desktop: optional on-screen joystick for mouse dragging (also supports mouse)
+  joyOuter.addEventListener('pointerdown', e=>{
+    if(e.pointerType === 'mouse' && !isMobileLike()) return; // ignore mouse on desktop to avoid conflicts with real keyboard
+    joyOuter.setPointerCapture(e.pointerId);
+    recalcJoy();
+    leftTouchId = e.pointerId;
+    const dx = e.clientX - joyCenter.x, dy = e.clientY - joyCenter.y;
+    const dist = Math.hypot(dx,dy);
+    const clamped = dist > joyMax ? (joyMax/dist) : 1;
+    setKnobPos(joyKnob, dx*clamped, dy*clamped);
+    updateActiveKeys(keysFromVector(dx,dy));
+  });
+  joyOuter.addEventListener('pointermove', e=>{
+    if(e.pointerId !== leftTouchId) return;
+    const dx = e.clientX - joyCenter.x, dy = e.clientY - joyCenter.y;
+    const dist = Math.hypot(dx,dy);
+    const clamped = dist > joyMax ? (joyMax/dist) : 1;
+    setKnobPos(joyKnob, dx*clamped, dy*clamped);
+    updateActiveKeys(keysFromVector(dx,dy));
+  });
+  joyOuter.addEventListener('pointerup', e=>{
+    if(e.pointerId !== leftTouchId) return;
+    joyOuter.releasePointerCapture(e.pointerId);
+    leftTouchId = null;
+    setKnobPos(joyKnob,0,0);
+    updateActiveKeys([]);
+  });
+
+  // ----------------- RIGHT JOYSTICK (aim) -----------------
+  const lookOuter = document.getElementById('mlook-outer');
+  const lookKnob = document.getElementById('mlook-knob');
+  let lookCenter = {x:0,y:0}, lookMax = 60;
+  function recalcLook(){ const r = lookOuter.getBoundingClientRect(); lookCenter = {x:r.left+r.width/2, y:r.top+r.height/2}; lookMax = Math.min(r.width,r.height)/2 - 24; }
+  recalcLook(); addEventListener('resize', recalcLook);
+
+  let rightTouchId = null;
+  lookOuter.addEventListener('touchstart', e=>{
+    e.preventDefault(); const t = e.changedTouches[0]; rightTouchId = t.identifier; const dx = t.clientX - lookCenter.x, dy = t.clientY - lookCenter.y; const dist=Math.hypot(dx,dy); const cl = dist>lookMax?lookMax/dist:1; setKnobPos(lookKnob, dx*cl, dy*cl);
+    // emulate mousemove on canvas: translate joystick vector to a point around player
+    const rect = canvas.getBoundingClientRect();
+    // map relative to canvas center - small sensitivity multiplier
+    const sens = 1.2;
+    const targetX = rect.left + rect.width/2 + (dx/cl) * sens * 12;
+    const targetY = rect.top + rect.height/2 + (dy/cl) * sens * 12;
+    dispatchMouseMove(targetX, targetY);
+  }, {passive:false});
+  lookOuter.addEventListener('touchmove', e=>{
+    e.preventDefault();
+    for(const t of e.changedTouches) if(t.identifier === rightTouchId){
+      const dx = t.clientX - lookCenter.x, dy = t.clientY - lookCenter.y;
+      const dist=Math.hypot(dx,dy); const cl = dist>lookMax?lookMax/dist:1; setKnobPos(lookKnob, dx*cl, dy*cl);
+      const rect = canvas.getBoundingClientRect();
+      const sens = 1.2;
+      const targetX = rect.left + rect.width/2 + (dx/cl) * sens * 12;
+      const targetY = rect.top + rect.height/2 + (dy/cl) * sens * 12;
+      dispatchMouseMove(targetX, targetY);
+    }
+  }, {passive:false});
+  lookOuter.addEventListener('touchend', e=>{ e.preventDefault(); for(const t of e.changedTouches) if(t.identifier===rightTouchId){ rightTouchId=null; setKnobPos(lookKnob,0,0); } }, {passive:false});
+
+  // pointer variant
+  lookOuter.addEventListener('pointerdown', e=>{
+    if(e.pointerType === 'mouse' && !isMobileLike()) return;
+    lookOuter.setPointerCapture(e.pointerId);
+    rightTouchId = e.pointerId;
+    const dx = e.clientX - lookCenter.x, dy = e.clientY - lookCenter.y;
+    const dist=Math.hypot(dx,dy); const cl = dist>lookMax?lookMax/dist:1; setKnobPos(lookKnob, dx*cl, dy*cl);
+    const rect = canvas.getBoundingClientRect();
+    const sens = 1.2;
+    const targetX = rect.left + rect.width/2 + (dx/cl) * sens * 12;
+    const targetY = rect.top + rect.height/2 + (dy/cl) * sens * 12;
+    dispatchMouseMove(targetX, targetY);
+  });
+  lookOuter.addEventListener('pointermove', e=>{ if(e.pointerId!==rightTouchId) return; const dx=e.clientX-lookCenter.x, dy=e.clientY-lookCenter.y; const dist=Math.hypot(dx,dy); const cl=dist>lookMax?lookMax/dist:1; setKnobPos(lookKnob, dx*cl, dy*cl); const rect=canvas.getBoundingClientRect(); const sens=1.2; dispatchMouseMove(rect.left+rect.width/2 + (dx/cl)*sens*12, rect.top+rect.height/2 + (dy/cl)*sens*12); });
+  lookOuter.addEventListener('pointerup', e=>{ if(e.pointerId!==rightTouchId) return; lookOuter.releasePointerCapture(e.pointerId); rightTouchId=null; setKnobPos(lookKnob,0,0); });
+
+  // ----------------- FIRE and RELOAD -----------------
+  const fireBtn = document.getElementById('fire-btn');
+  fireBtn.addEventListener('touchstart', e=>{ e.preventDefault(); dispatchKey('keydown',' ','Space'); dispatchMouseDown(); }, {passive:false});
+  fireBtn.addEventListener('touchend', e=>{ e.preventDefault(); dispatchKey('keyup',' ','Space'); dispatchMouseUp(); }, {passive:false});
+  fireBtn.addEventListener('pointerdown', e=>{ if(e.pointerType==='mouse' && !isMobileLike()) return; e.preventDefault(); dispatchKey('keydown',' ','Space'); dispatchMouseDown(); });
+  fireBtn.addEventListener('pointerup', e=>{ if(e.pointerType==='mouse' && !isMobileLike()) return; e.preventDefault(); dispatchKey('keyup',' ','Space'); dispatchMouseUp(); });
+
+  const reloadBtn = document.getElementById('reload-btn');
+  reloadBtn.addEventListener('touchstart', e=>{ e.preventDefault(); dispatchKey('keydown','r','KeyR'); }, {passive:false});
+  reloadBtn.addEventListener('touchend', e=>{ e.preventDefault(); dispatchKey('keyup','r','KeyR'); }, {passive:false});
+
+  // ----------------- expose API -----------------
+  window.virtualInput = {
+    getActiveKeys: ()=>Array.from(activeKeys),
+    setMovementByAngle: (deg,mag)=>{ // degrees, magnitude 0..1
+      recalcJoy();
+      const rad = deg*Math.PI/180;
+      const dx = Math.cos(rad)*mag*joyMax;
+      const dy = Math.sin(rad)*mag*joyMax;
+      setKnobPos(joyKnob, dx, dy);
+      updateActiveKeys(keysFromVector(dx,dy));
+    },
+    resetMovement: ()=>{ setKnobPos(joyKnob,0,0); updateActiveKeys([]); },
+    setAimByOffset: (ox,oy)=>{ // ox,oy in px relative to look center
+      recalcLook();
+      const dist = Math.hypot(ox,oy); const cl = dist>lookMax?lookMax/dist:1; setKnobPos(lookKnob, ox*cl, oy*cl);
+      const rect = canvas.getBoundingClientRect(); dispatchMouseMove(rect.left+rect.width/2 + ox*0.2, rect.top+rect.height/2 + oy*0.2);
+    }
+  };
+
+  // ----------------- keyboard passthrough for desktop -----------------
+  // For PC players we don't emulate keyboard — they use real keys.
+  // But provide sample keyboard handling for local demo (arrow keys move demo player):
+  const keyState = {};
+  window.addEventListener('keydown', e=>{
+    keyState[e.key] = true;
+    // demo: move player with WASD or arrows
+    const step = 4;
+    if(e.key==='w' || e.key==='ArrowUp') py -= step;
+    if(e.key==='s' || e.key==='ArrowDown') py += step;
+    if(e.key==='a' || e.key==='ArrowLeft') px -= step;
+    if(e.key==='d' || e.key==='ArrowRight') px += step;
+  });
+  window.addEventListener('keyup', e=>{ keyState[e.key] = false; });
+
+  // automatically center demo player on mouse move (desktop)
+  canvas.addEventListener('mousemove', e=>{
+    if(!isMobileLike()) { px = e.offsetX; py = e.offsetY; }
+  });
+
+  // prevent touch scroll when touching controls area
+  document.body.addEventListener('touchmove', function(e){
+    if(e.target.closest('.mobile-controls')) e.preventDefault();
+  }, {passive:false});
+
+})(); // end virtual input IIFE
+
+/* ===========================
+   Notes and disclaimers shown in console
+   =========================== */
+console.info('Unified client loaded. Auto-mode:', (isMobileLike() ? 'mobile-like' : 'desktop-like'));
+console.info('Mobile controls dispatch synthetic KeyboardEvents (W/A/S/D, Space, R) and mouse events to canvas. Some external sites may ignore synthetic keyboard events for security; use in-browser games or handle custom events "virtual-input-key" and "virtual-input-mouse".');
+
+</script>
+</body>
+</html>
